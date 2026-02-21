@@ -14,6 +14,10 @@ Kaggle: `mannekuntanagendra/single-cell-rna-seq-analysis-qc-clustering-pbmc-3k`
 Notebook: `notebooks/pbmc3k_arrow_pipeline.Rmd`  
 Rendered HTML: `notebooks/pbmc3k_arrow_pipeline.html`
 
+### View the Report
+GitHub Pages (recommended):  
+`https://stavgrossfeld.github.io/analysis-portfolio/pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html`
+
 ### R Setup (pak)
 The notebook installs deps with `pak` automatically. If you want to install manually:
 ```r

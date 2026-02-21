@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analysis Portfolio | Stav Grossfeld</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e6e6e6;
+      --muted: #b8b8b8;
+      --accent: #7bdcb5;
+      --accent-2: #6fb6ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Space Grotesk", "Inter", system-ui, -apple-system, Segoe UI, sans-serif;
+      background: radial-gradient(1200px 800px at 10% 10%, #1d2433 0%, #0f1115 60%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 20px 80px;
+    }
+    header {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 40px;
+      letter-spacing: 0.3px;
+    }
+    p.lead {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+    .grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid #222734;
+      border-radius: 14px;
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+      min-height: 160px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    .tag {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: #0f1115;
+      background: var(--accent);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .card h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    a.button {
+      display: inline-block;
+      margin-top: 6px;
+      color: #0f1115;
+      background: var(--accent-2);
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    footer {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Analysis Portfolio</h1>
+      <p class="lead">Selected analysis projects with reproducible workflows, clean visuals, and shareable outputs.</p>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <span class="tag">scRNA-seq</span>
+        <h2>PBMC 3k Pipeline</h2>
+        <p>End-to-end single-cell pipeline with QC, normalization, PCA/UMAP, clustering, marker discovery, and manual cell-type labels. Includes Arrow outputs and a reproducible runbook.</p>
+        <a class="button" href="pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html">View report</a>
+      </article>
+    </section>
+
+    <footer>
+      Built with R/Seurat + Apache Arrow. More projects coming soon.
+    </footer>
+  </div>
+</body>
+</html>

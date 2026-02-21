@@ -1,0 +1,24 @@
+# R / renv
+.Rhistory
+.RData
+.Rproj.user/
+.Rprofile
+renv/
+renv/library/
+renv/staging/
+renv/python/
+
+# Data and outputs
+/data/
+outputs/
+notebooks/data/
+notebooks/outputs/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Secrets
+.kaggle/

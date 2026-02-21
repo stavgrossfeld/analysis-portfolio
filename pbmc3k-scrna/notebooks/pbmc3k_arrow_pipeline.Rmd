@@ -1,0 +1,259 @@
+---
+title: "PBMC 3k scRNA-seq Pipeline (Arrow + Seurat)"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+# Install dependencies via pak (preferred)
+# Set SKIP_PAK_INSTALL=1 to skip install during render.
+# Set SKIP_R_RUN=1 to render without executing code chunks.
+required_pkgs <- c("Seurat", "Matrix", "ggplot2", "dplyr", "tidyr", "arrow")
+if (!requireNamespace("pak", quietly = TRUE)) {
+  install.packages("pak")
+}
+if (Sys.getenv("SKIP_PAK_INSTALL") != "1") {
+  missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
+  if (length(missing_pkgs) > 0) {
+    pak::pkg_install(missing_pkgs)
+  }
+}
+
+if (Sys.getenv("SKIP_R_RUN") == "1") {
+  knitr::opts_chunk$set(eval = FALSE)
+} else {
+  library(Seurat)
+  library(Matrix)
+  library(ggplot2)
+  library(dplyr)
+  library(arrow)
+  library(tidyr)
+}
+
+DATASET <- "mannekuntanagendra/single-cell-rna-seq-analysis-qc-clustering-pbmc-3k"
+DATA_DIR <- "data/pbmc3k"
+OUTPUT_DIR <- "outputs"
+ARROW_DIR <- file.path(OUTPUT_DIR, "arrow")
+
+if (!dir.exists(OUTPUT_DIR)) dir.create(OUTPUT_DIR, recursive = TRUE)
+if (!dir.exists(ARROW_DIR)) dir.create(ARROW_DIR, recursive = TRUE)
+```
+
+## Summary
+
+End‑to‑end scRNA‑seq workflow on PBMC 3k: QC, normalization, feature selection, PCA/UMAP, clustering, marker discovery, and export of reusable artifacts.
+
+## Get the Data
+
+If you have Kaggle CLI configured, this will download and unzip the dataset. Otherwise, manually download from Kaggle and place the files inside `data/pbmc3k/`.
+
+**Why this matters:** Data access should be reproducible and boring. This shows an automated download path with a manual fallback.
+
+```{r kaggle, message=FALSE, warning=FALSE}
+ensure_data_dir <- function(path) {
+  if (!dir.exists(path)) dir.create(path, recursive = TRUE)
+}
+
+has_kaggle_token <- function() {
+  file.exists(file.path(path.expand("~"), ".kaggle", "kaggle.json"))
+}
+
+try_kaggle_download <- function(dataset, dest_dir) {
+  ensure_data_dir(dest_dir)
+
+  kaggle_bin <- Sys.which("kaggle")
+  if (kaggle_bin == "" || !has_kaggle_token()) {
+    return(invisible(FALSE))
+  }
+
+  args <- c("datasets", "download", "-d", dataset, "-p", dest_dir, "--unzip")
+  system2(kaggle_bin, args = args)
+  invisible(TRUE)
+}
+
+try_kaggle_download(DATASET, DATA_DIR)
+
+list.files(DATA_DIR, recursive = TRUE)[1:10]
+```
+
+## Load Dataset
+
+This attempts to load a 10x directory if present. The Kaggle PBMC 3k dataset typically ships with `matrix.mtx`, `features.tsv`, and `barcodes.tsv`.
+
+**Why this matters:** 10x Genomics is the most common scRNA‑seq format, so it’s worth handling cleanly.
+
+```{r load}
+load_dataset_auto <- function(data_dir) {
+  mtx <- list.files(data_dir, pattern = "matrix.mtx", recursive = TRUE, full.names = TRUE)
+  if (length(mtx) > 0) {
+    return(Read10X(data.dir = dirname(mtx[1])))
+  }
+
+  stop("No supported files found. Expected 10x mtx directory.")
+}
+
+counts <- load_dataset_auto(DATA_DIR)
+seu <- CreateSeuratObject(counts = counts, project = "pbmc3k")
+
+seu
+```
+
+## Basic QC
+
+**What happens here:** Compute per‑cell QC metrics and look at the distributions (library size, gene counts, mitochondrial fraction).
+
+**Why this matters:** QC is where you separate biology from technical artifacts.
+
+**Notes:** Mitochondrial percentage, total UMIs, and detected genes are standard diagnostics for cell viability and doublets. These plots make it easier to choose sensible thresholds.
+
+```{r qc}
+seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
+
+VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+FeatureScatter(seu, feature1 = "nCount_RNA", feature2 = "percent.mt")
+
+qc_tbl <- seu@meta.data %>%
+  select(nFeature_RNA, nCount_RNA, percent.mt)
+qc_tbl$cell_id <- rownames(seu@meta.data)
+
+arrow::write_feather(qc_tbl, file.path(ARROW_DIR, "qc_metrics.feather"))
+```
+
+## Filter, Normalize, and Find Variable Features
+
+**What happens here:** Filter low‑quality cells/genes, normalize counts, and select highly variable genes for downstream signal.
+
+**Why this matters:** These are the standard preprocessing choices for scRNA‑seq.
+
+**Notes:** Filtering removes sparse or damaged cells; log‑normalization stabilizes variance; highly variable genes capture the most informative biology and improve downstream dimensionality reduction.
+
+```{r normalize}
+seu <- subset(seu, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 15)
+
+seu <- NormalizeData(seu)
+seu <- FindVariableFeatures(seu, selection.method = "vst", nfeatures = 2000)
+seu <- ScaleData(seu)
+```
+
+## PCA, UMAP, Clustering
+
+**What happens here:** Reduce dimensionality (PCA), build a neighborhood graph, embed with UMAP, and identify clusters.
+
+**Why this matters:** Dimensionality reduction + clustering are the backbone of scRNA‑seq analysis.
+
+**Notes:** PCA captures major axes of variation; a KNN graph models local structure; UMAP provides a 2D view; Leiden clustering detects communities that often map to cell types or states.
+
+```{r reduce}
+seu <- RunPCA(seu)
+seu <- FindNeighbors(seu, dims = 1:20)
+seu <- FindClusters(seu, resolution = 0.6)
+seu <- RunUMAP(seu, dims = 1:20)
+
+DimPlot(seu, reduction = "umap", label = TRUE)
+```
+
+## Marker Genes
+
+**What happens here:** Identify genes that are differentially expressed in each cluster.
+
+**Why this matters:** Marker discovery drives cell‑type labeling and interpretation.
+
+**Notes:** Differential expression across clusters highlights signature genes that can be matched to known cell types or used to discover novel states.
+
+```{r markers}
+markers <- FindAllMarkers(seu, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+head(markers, 10)
+```
+
+## Putative Cell‑Type Labels (Manual)
+
+**What happens here:** Use canonical PBMC marker sets and cluster‑level scores to assign **putative** labels.  
+These are best‑effort labels based on marker expression, not ground truth.
+
+```{r cell_type_labels}
+marker_sets <- list(
+  B_cells = c("MS4A1", "CD79A", "CD74"),
+  T_cells = c("CD3D", "CD3E", "IL7R", "LTB"),
+  NK_cells = c("NKG7", "GNLY", "PRF1"),
+  Monocytes = c("LST1", "S100A8", "S100A9", "LYZ"),
+  Dendritic = c("FCER1A", "CST3"),
+  Platelets = c("PPBP", "PF4")
+)
+
+# Score each marker set per cell
+seu <- AddModuleScore(seu, features = marker_sets, name = "celltype_score")
+
+# Map scores back to names
+score_cols <- paste0("celltype_score", seq_along(marker_sets))
+score_df <- FetchData(seu, vars = c("seurat_clusters", score_cols))
+colnames(score_df) <- c("cluster", names(marker_sets))
+
+# Average score per cluster and assign the max
+cluster_scores <- score_df %>%
+  group_by(cluster) %>%
+  summarise(across(all_of(names(marker_sets)), mean), .groups = "drop")
+
+cluster_labels <- cluster_scores %>%
+  pivot_longer(-cluster, names_to = "label", values_to = "score") %>%
+  group_by(cluster) %>%
+  slice_max(score, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+cluster_labels
+```
+
+```{r apply_labels}
+label_map <- setNames(cluster_labels$label, cluster_labels$cluster)
+cell_type_vec <- label_map[as.character(seu$seurat_clusters)]
+names(cell_type_vec) <- colnames(seu)
+seu <- AddMetaData(seu, metadata = cell_type_vec, col.name = "cell_type")
+DimPlot(seu, reduction = "umap", group.by = "cell_type", label = TRUE)
+```
+
+## Selected Gene Boxplots
+
+**What happens here:** Visualize expression of canonical immune markers across clusters.
+
+**Why this matters:** These plots help validate cluster identities.
+
+**Why these genes:** `MS4A1` (B cells), `CD3D` (T cells), `LST1` (monocytes), and `NKG7`/`GNLY` (NK/cytotoxic cells) are canonical PBMC markers that usually separate major immune lineages.
+
+**Notes:** Boxplots summarize expression distributions and outliers, making cluster‑level differences easy to compare.
+
+```{r gene_boxplots}
+marker_genes <- c("MS4A1", "CD3D", "LST1", "NKG7", "GNLY")
+
+gene_df <- FetchData(seu, vars = c("seurat_clusters", marker_genes))
+gene_long <- gene_df %>%
+  pivot_longer(cols = all_of(marker_genes), names_to = "gene", values_to = "expression")
+
+ggplot(gene_long, aes(x = seurat_clusters, y = expression, fill = seurat_clusters)) +
+  geom_boxplot(outlier.size = 0.4, width = 0.6, alpha = 0.85) +
+  facet_wrap(~ gene, scales = "free_y", ncol = 3) +
+  labs(x = "Cluster", y = "Expression") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+## Save Outputs
+
+**What happens here:** Save a Seurat object for reuse and export lightweight Arrow tables for downstream consumption.
+
+**Why this matters:** Keeps the results portable, not just in plots.
+
+```{r save}
+saveRDS(seu, file.path(OUTPUT_DIR, "pbmc3k_seurat.rds"))
+
+cluster_tbl <- seu@meta.data %>%
+  select(nFeature_RNA, nCount_RNA, percent.mt, seurat_clusters)
+cluster_tbl$cell_id <- rownames(seu@meta.data)
+
+arrow::write_feather(cluster_tbl, file.path(ARROW_DIR, "cell_clusters.feather"))
+```
+
+## Portfolio Notes
+
+Suggested talking points for GitHub/LinkedIn:
+- Built an end-to-end single-cell pipeline in Seurat (QC → normalization → PCA/UMAP → clustering → markers)
+- Used Apache Arrow/Feather to persist QC and cluster tables for fast handoff
+- Reproducible workflow with clear data access and outputs

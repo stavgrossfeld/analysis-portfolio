@@ -18,6 +18,9 @@ Rendered HTML: `notebooks/pbmc3k_arrow_pipeline.html`
 GitHub Pages (recommended):  
 `https://stavgrossfeld.github.io/analysis-portfolio/pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html`
 
+GitHub source (Markdown/HTML in repo):  
+`https://github.com/stavgrossfeld/analysis-portfolio/tree/main/pbmc3k-scrna`
+
 ### R Setup (pak)
 The notebook installs deps with `pak` automatically. If you want to install manually:
 ```r

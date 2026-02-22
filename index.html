@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Analysis Portfolio | Stav Grossfeld</title>
+  <title>Stav Grossfeld | Analysis Notes</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -13,6 +13,7 @@
       --accent: #7bdcb5;
       --accent-2: #6fb6ff;
       --accent-3: #f6d365;
+      --link: #9bd1ff;
     }
     * { box-sizing: border-box; }
     body {
@@ -22,19 +23,19 @@
       color: var(--text);
     }
     .wrap {
-      max-width: 1040px;
+      max-width: 920px;
       margin: 0 auto;
-      padding: 48px 20px 90px;
+      padding: 56px 20px 90px;
     }
     header {
       display: grid;
-      gap: 16px;
-      margin-bottom: 36px;
+      gap: 14px;
+      margin-bottom: 32px;
     }
     h1 {
       margin: 0;
-      font-size: 42px;
-      letter-spacing: 0.3px;
+      font-size: 40px;
+      letter-spacing: 0.2px;
     }
     p.lead {
       margin: 0;
@@ -43,45 +44,41 @@
       line-height: 1.6;
       max-width: 760px;
     }
-    .row {
-      display: grid;
-      gap: 18px;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid #222734;
-      border-radius: 14px;
-      padding: 18px;
-      display: grid;
-      gap: 12px;
-      min-height: 160px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    }
-    .tag {
-      display: inline-block;
-      font-size: 12px;
-      letter-spacing: 0.6px;
-      text-transform: uppercase;
-      color: #0f1115;
-      background: var(--accent);
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-weight: 700;
-    }
-    .card h2 {
-      margin: 0;
-      font-size: 20px;
-    }
-    .card p {
-      margin: 0;
+    .about {
+      margin-top: 8px;
       color: var(--muted);
-      line-height: 1.5;
-      font-size: 14px;
+      font-size: 15px;
     }
-    a.button {
+    a.link {
+      color: var(--link);
+      text-decoration: none;
+    }
+    .post {
+      margin-top: 26px;
+      padding: 18px 0 24px;
+      border-top: 1px solid #222734;
+    }
+    .post h2 {
+      margin: 0 0 6px 0;
+      font-size: 22px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .post p {
+      margin: 10px 0;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+    .post ul {
+      margin: 10px 0 0 18px;
+      color: var(--muted);
+    }
+    .cta {
       display: inline-block;
-      margin-top: 6px;
+      margin-top: 10px;
       color: #0f1115;
       background: var(--accent-2);
       text-decoration: none;
@@ -90,25 +87,7 @@
       font-weight: 700;
       font-size: 14px;
     }
-    .button.alt { background: var(--accent-3); }
-    .section {
-      margin-top: 28px;
-    }
-    .section h3 {
-      margin: 0 0 12px 0;
-      font-size: 18px;
-      color: #d7e3ff;
-      letter-spacing: 0.2px;
-    }
-    .post {
-      background: #12151c;
-      border: 1px solid #222734;
-      border-radius: 14px;
-      padding: 16px;
-      line-height: 1.6;
-      color: var(--muted);
-    }
-    .post strong { color: var(--text); }
+    .cta.alt { background: var(--accent-3); }
     footer {
       margin-top: 40px;
       color: var(--muted);
@@ -119,37 +98,27 @@
 <body>
   <div class="wrap">
     <header>
-      <h1>Analysis Portfolio</h1>
-      <p class="lead">Selected analysis projects with reproducible workflows, clean visuals, and shareable outputs. I focus on building pipelines that are readable, traceable, and easy to hand off.</p>
+      <h1>Stav Grossfeld — Analysis Notes</h1>
+      <p class="lead">A running log of analysis projects with clean visuals, reproducible steps, and practical outputs.</p>
+      <div class="about">I’m Stav, based in NYC. I work in bioinformatics and build scRNA‑seq and data workflows that are easy to run, debug, and share.</div>
     </header>
 
-    <section class="row">
-      <article class="card">
-        <span class="tag">scRNA-seq</span>
-        <h2>PBMC 3k Pipeline</h2>
-        <p>End-to-end single-cell pipeline with QC, normalization, PCA/UMAP, clustering, marker discovery, and manual cell-type labels. Includes Arrow outputs and a reproducible runbook.</p>
-        <div>
-          <a class="button" href="pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html">View report</a>
-          <a class="button alt" href="pbmc3k-scrna/README.md">Project README</a>
-        </div>
-      </article>
-    </section>
-
-    <section class="section">
-      <h3>LinkedIn Post Draft</h3>
-      <div class="post">
-        <strong>Just shipped a full single‑cell RNA‑seq pipeline on PBMC 3k and published it as a clean, reproducible analysis artifact.</strong><br><br>
-        What’s inside:
-        <br>- QC → normalization → HVG selection → PCA/UMAP → clustering → marker discovery
-        <br>- Manual cell‑type labeling using canonical PBMC markers
-        <br>- Arrow/Feather exports for portable downstream use
-        <br>- A runbook so anyone can reproduce the results end‑to‑end
-        <br><br>
-        I wanted this to feel like something you’d actually hand off in a real team: clear assumptions, reproducible steps, and outputs that can feed the next stage without rework.
-        <br><br>
-        If you’re doing scRNA‑seq, data tooling, or pipeline design, I’d love feedback. I’ll drop the GitHub link in the comments.
-      </div>
-    </section>
+    <article class="post">
+      <h2>PBMC 3k scRNA‑seq pipeline</h2>
+      <div class="meta">Project log · scRNA‑seq · Seurat + Arrow</div>
+      <p>Just shipped a full single‑cell RNA‑seq pipeline on PBMC 3k and published it as a clean, reproducible analysis artifact.</p>
+      <p><strong>What’s inside:</strong></p>
+      <ul>
+        <li>QC → normalization → HVG selection → PCA/UMAP → clustering → marker discovery</li>
+        <li>Manual cell‑type labeling using canonical PBMC markers</li>
+        <li>Arrow/Feather exports for portable downstream use</li>
+        <li>A runbook so anyone can reproduce the results end‑to‑end</li>
+      </ul>
+      <p>I wanted this to feel like something you’d actually hand off in a real team: clear assumptions, reproducible steps, and outputs that can feed the next stage without rework.</p>
+      <p>If you’re doing scRNA‑seq, data tooling, or pipeline design, I’d love feedback. I’ll drop the GitHub link in the comments.</p>
+      <a class="cta" href="pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html">View report</a>
+      <a class="cta alt" href="pbmc3k-scrna/README.md">Project README</a>
+    </article>
 
     <footer>
       Built with R/Seurat + Apache Arrow. More projects coming soon.

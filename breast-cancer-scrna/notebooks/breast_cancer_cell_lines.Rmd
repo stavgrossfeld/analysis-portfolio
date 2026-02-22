@@ -41,6 +41,39 @@ if (!file.exists(mtx_file)) {
 
 This is a single-cell atlas of 32 human breast cancer cell lines (35,276 cells) originally published as GSE173634. I picked it because it’s a clean, well-annotated dataset with a wide range of molecular subtypes. That makes it a good playground for testing clustering quality, state scoring, and marker-driven interpretation.
 
+# Glossary (abbreviations)
+
+- `scRNA-seq`: single-cell RNA sequencing.
+- `QC`: quality control.
+- `UMI`: unique molecular identifier, used to count transcripts.
+- `nCount_RNA`: total UMI counts per cell.
+- `nFeature_RNA`: number of genes detected per cell.
+- `percent.mt`: percent of counts from mitochondrial genes per cell.
+- `HVG`: highly variable genes.
+- `PCA`: principal component analysis.
+- `UMAP`: Uniform Manifold Approximation and Projection (2D embedding).
+- `S/G2M`: cell-cycle phases.
+- `HVG`: highly variable genes used for dimensionality reduction.
+- `Epithelial/Mesenchymal`: broad expression states often contrasted in cancer.
+- `Markers`: genes enriched in a cluster relative to others.
+
+# What you can learn from each plot
+
+- `QC violin plots`: distributions of `nFeature_RNA`, `nCount_RNA`, and `percent.mt` to detect low-quality cells or outliers.
+- `Variable feature plot`: whether HVGs are captured and how strongly they vary.
+- `Elbow plot`: how many PCs capture most signal before diminishing returns.
+- `UMAP (clusters)`: overall structure and separation of clusters.
+- `UMAP (cell line)`: whether clustering aligns with known cell-line identity.
+- `UMAP (cell cycle)`: whether clusters are driven by cycling status.
+- `State score feature plots`: spatial pattern of epithelial/mesenchymal/proliferative/stress programs.
+- `State-labeled UMAP`: high-level interpretation of clusters by dominant program.
+- `Gene boxplots`: per-cluster expression for key genes (signals specific biology).
+- `Validation scatter/UMAP/VLN plots`: check if clusters are dominated by QC artifacts.
+
+# What we learn from the full analysis
+
+This pipeline shows how breast cancer cell lines separate into interpretable expression states, which programs dominate each cluster, and whether the structure is biological rather than QC-driven. It also highlights which canonical genes (e.g., `EPCAM`, `VIM`, `MKI67`, `ERBB2`, `ESR1`) anchor those states, giving you a concrete story you can explain to a technical audience.
+
 # Load counts
 
 We start from the Matrix Market files bundled with the dataset. Barcodes embed the cell-line label, so we recover it directly from the IDs.

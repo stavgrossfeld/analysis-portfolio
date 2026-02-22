@@ -19,20 +19,20 @@ This file documents how to reproduce the analysis and rendered HTML.
    chmod 600 ~/.kaggle/kaggle.json
    ```
 
-## Install dependencies (renv + pak)
+## Install dependencies (shared renv + pak)
 ```bash
-/Library/Frameworks/R.framework/Resources/bin/R -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv", repos="https://cloud.r-project.org"); renv::activate("/Users/stav/Desktop/codex_stuff"); renv::settings$snapshot.type("explicit"); renv::install("pak"); pak::pkg_install(c("Seurat","Matrix","ggplot2","dplyr","SeuratObject","patchwork","cowplot","ggrepel","ggridges","plotly","sctransform","igraph","uwot","reticulate","arrow")); renv::snapshot()'
+/Library/Frameworks/R.framework/Resources/bin/R -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv", repos="https://cloud.r-project.org"); renv::activate("/Users/stav/repos/analysis-portfolio"); renv::settings$snapshot.type("explicit"); renv::install("pak"); pak::pkg_install(c("Seurat","Matrix","ggplot2","dplyr","SeuratObject","patchwork","cowplot","ggrepel","ggridges","plotly","sctransform","igraph","uwot","reticulate","arrow")); renv::snapshot()'
 ```
 
 ## Download dataset
 The notebook can download automatically if `kaggle` is installed in PATH. If not, use:
 ```bash
-~/.virtualenvs/r-reticulate/bin/kaggle datasets download -d mannekuntanagendra/single-cell-rna-seq-analysis-qc-clustering-pbmc-3k -p /Users/stav/Desktop/codex_stuff/data/pbmc3k --unzip
+~/.virtualenvs/r-reticulate/bin/kaggle datasets download -d mannekuntanagendra/single-cell-rna-seq-analysis-qc-clustering-pbmc-3k -p /Users/stav/repos/analysis-portfolio/pbmc3k-scrna/data/pbmc3k --unzip
 ```
 
 ## Render the notebook
 ```bash
-/Library/Frameworks/R.framework/Resources/bin/R -e 'library(renv); renv::load("/Users/stav/Desktop/codex_stuff"); rmarkdown::render("notebooks/pbmc3k_arrow_pipeline.Rmd")'
+/Library/Frameworks/R.framework/Resources/bin/R -e 'library(renv); renv::load("/Users/stav/repos/analysis-portfolio"); rmarkdown::render("pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.Rmd")'
 ```
 
 ## Outputs

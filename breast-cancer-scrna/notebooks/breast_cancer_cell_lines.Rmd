@@ -1,0 +1,306 @@
+---
+title: "Breast Cancer Cell Lines Atlas — Single-Cell RNA-seq"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: readable
+    highlight: tango
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+set.seed(7)
+options(stringsAsFactors = FALSE)
+
+RUN_MARKERS <- FALSE
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(Matrix)
+  library(dplyr)
+  library(ggplot2)
+  library(patchwork)
+  library(tidyr)
+  library(stringr)
+  library(biomaRt)
+  library(viridis)
+})
+
+root_dir <- normalizePath(file.path(".."))
+mtx_dir <- file.path(root_dir, "data", "MTX_FMT_GSE173634")
+mtx_file <- file.path(mtx_dir, "matrix.mtx")
+features_file <- file.path(mtx_dir, "features.tsv")
+barcodes_file <- file.path(mtx_dir, "barcodes.tsv")
+
+if (!file.exists(mtx_file)) {
+  stop("Missing MTX files. Download the Kaggle dataset into breast-cancer-scrna/data.")
+}
+```
+
+# Why this dataset
+
+This is a single-cell atlas of 32 human breast cancer cell lines (35,276 cells) originally published as GSE173634. I picked it because it’s a clean, well-annotated dataset with a wide range of molecular subtypes. That makes it a good playground for testing clustering quality, state scoring, and marker-driven interpretation.
+
+# Load counts
+
+We start from the Matrix Market files bundled with the dataset. Barcodes embed the cell-line label, so we recover it directly from the IDs.
+
+```{r load-data, message=FALSE, warning=FALSE}
+bc_counts <- ReadMtx(mtx = mtx_file, features = features_file, cells = barcodes_file, feature.column = 1)
+
+bc <- CreateSeuratObject(counts = bc_counts, min.cells = 3, min.features = 200)
+bc$cell_line <- sub("_.*", "", colnames(bc))
+
+bc
+```
+
+```{r inspect-metadata}
+head(bc@meta.data)
+```
+
+# QC and filtering
+
+I keep the QC story simple: remove empty droplets and clear low-quality cells. I’m not doing aggressive filtering because these are cell lines, but I still want to avoid obvious junk.
+
+```{r qc-metrics}
+bc[["percent.mt"]] <- PercentageFeatureSet(bc, pattern = "^MT-")
+
+VlnPlot(bc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+```{r qc-filter}
+bc <- subset(bc, subset = nFeature_RNA > 300 & nFeature_RNA < 7000 & percent.mt < 20)
+
+bc
+```
+
+# Normalize + feature selection
+
+I use log-normalization and select highly variable genes. It’s fast and gives clean separation for this scale of data.
+
+```{r normalize}
+bc <- NormalizeData(bc)
+bc <- FindVariableFeatures(bc, selection.method = "vst", nfeatures = 3000)
+
+VariableFeaturePlot(bc)
+```
+
+# Dimensionality reduction and clustering
+
+PCA → UMAP → clustering. I keep the resolution moderate to avoid splitting cell lines into tiny micro-clusters unless the data strongly supports it.
+
+```{r pca-umap}
+bc <- ScaleData(bc, features = VariableFeatures(bc))
+bc <- RunPCA(bc, features = VariableFeatures(bc))
+
+ElbowPlot(bc)
+```
+
+```{r cluster}
+bc <- FindNeighbors(bc, dims = 1:30)
+bc <- FindClusters(bc, resolution = 0.4)
+bc <- RunUMAP(bc, dims = 1:30)
+
+DimPlot(bc, reduction = "umap", label = TRUE) + NoLegend()
+```
+
+# Cell line context
+
+The barcode prefix encodes cell-line identity, so I keep it as a grouping label.
+
+```{r cell-line-umap}
+DimPlot(bc, reduction = "umap", group.by = "cell_line", label = FALSE) +
+  guides(color = guide_legend(override.aes = list(size = 3), ncol = 2))
+```
+
+# Cell-cycle scoring
+
+This adds some biological context that’s often hidden in raw clusters.
+
+```{r biomart-setup}
+mart <- NULL
+for (mirror in c("useast", "uswest", "asia", "www")) {
+  mart <- tryCatch(
+    biomaRt::useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl", mirror = mirror),
+    error = function(e) NULL
+  )
+  if (!is.null(mart)) break
+}
+
+if (is.null(mart)) {
+  stop("Unable to connect to Ensembl via biomaRt. Try again later or set a different mirror.")
+}
+
+map_symbols <- function(symbols) {
+  symbol_map <- biomaRt::getBM(
+    attributes = c("hgnc_symbol", "ensembl_gene_id"),
+    filters = "hgnc_symbol",
+    values = unique(symbols),
+    mart = mart
+  )
+
+  symbol_map <- symbol_map %>%
+    dplyr::filter(hgnc_symbol != "", ensembl_gene_id %in% rownames(bc)) %>%
+    dplyr::distinct(hgnc_symbol, .keep_all = TRUE)
+
+  setNames(symbol_map$ensembl_gene_id, symbol_map$hgnc_symbol)
+}
+```
+
+```{r cell-cycle}
+cc <- Seurat::cc.genes
+
+s_genes <- unname(map_symbols(cc$s.genes))
+g2m_genes <- unname(map_symbols(cc$g2m.genes))
+
+if (length(s_genes) >= 10 && length(g2m_genes) >= 10) {
+  bc <- CellCycleScoring(bc, s.features = s_genes, g2m.features = g2m_genes)
+  DimPlot(bc, reduction = "umap", group.by = "Phase")
+} else {
+  message("Cell-cycle scoring skipped: not enough cell-cycle genes matched.")
+}
+```
+
+# Gene symbol mapping
+
+The count matrix uses Ensembl IDs. For the state scores and plots below, I map a small set of gene symbols to their Ensembl IDs.
+
+```{r gene-symbol-map}
+symbol_sets <- list(
+  Epithelial = c("EPCAM", "KRT8", "KRT18", "KRT19", "MUC1"),
+  Mesenchymal = c("VIM", "FN1", "ZEB1", "ZEB2", "COL1A1"),
+  Proliferative = c("MKI67", "TOP2A", "HMGB2", "TYMS", "STMN1"),
+  Stress = c("FOS", "JUN", "HSPA1A", "HSP90AA1"),
+  PlotGenes = c("EPCAM", "KRT19", "VIM", "MKI67", "TOP2A", "ERBB2", "ESR1")
+)
+
+target_symbols <- unique(unlist(symbol_sets))
+
+symbol_to_ens <- map_symbols(target_symbols)
+```
+
+# State scoring (epithelial vs mesenchymal)
+
+These scores are not “cell types” in the classical sense, but they help interpret how clusters lean along common cancer state axes.
+
+```{r state-scores}
+state_sets <- lapply(symbol_sets[names(symbol_sets) != "PlotGenes"], function(g) unname(symbol_to_ens[g]))
+state_sets <- lapply(state_sets, function(g) g[!is.na(g)])
+state_sets <- state_sets[lengths(state_sets) > 0]
+
+if (length(state_sets) == 0) {
+  stop("No state gene sets matched the dataset.")
+}
+
+bc <- AddModuleScore(bc, features = state_sets, name = names(state_sets))
+
+score_cols <- paste0(names(state_sets), "1")
+score_cols <- score_cols[score_cols %in% colnames(bc@meta.data)]
+
+if (length(score_cols) > 0) {
+  FeaturePlot(bc, features = score_cols, ncol = 2)
+} else {
+  message("State scores skipped: no score columns were created.")
+}
+```
+
+```{r state-labels}
+if (length(score_cols) > 0) {
+  score_df <- bc@meta.data %>%
+    dplyr::select(seurat_clusters, all_of(score_cols)) %>%
+    dplyr::group_by(seurat_clusters) %>%
+    dplyr::summarize(across(all_of(score_cols), mean), .groups = "drop")
+
+  score_mat <- as.data.frame(score_df)
+  row.names(score_mat) <- score_mat$seurat_clusters
+  score_mat$seurat_clusters <- NULL
+
+  state_labels <- apply(score_mat, 1, function(x) names(state_sets)[which.max(x)])
+
+  bc$state_label <- unname(state_labels[as.character(bc$seurat_clusters)])
+
+  DimPlot(bc, reduction = "umap", group.by = "state_label", label = TRUE)
+} else {
+  message("State labels skipped: no scores available.")
+}
+```
+
+# Marker discovery
+
+Markers help explain *why* a cluster exists. This step is optional because it can be slow on laptops. Toggle `RUN_MARKERS` in the setup chunk if you want to run it.
+
+```{r markers}
+if (RUN_MARKERS) {
+  bc_markers <- subset(bc, downsample = 20)
+
+  markers <- FindAllMarkers(
+    bc_markers,
+    only.pos = TRUE,
+    min.pct = 0.15,
+    logfc.threshold = 0.3
+  )
+
+  top_markers <- markers %>%
+    group_by(cluster) %>%
+    slice_max(avg_log2FC, n = 5) %>%
+    ungroup()
+
+  marker_map <- biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "hgnc_symbol"),
+    filters = "ensembl_gene_id",
+    values = unique(top_markers$gene),
+    mart = mart
+  )
+
+  top_markers %>%
+    dplyr::left_join(marker_map, by = c("gene" = "ensembl_gene_id")) %>%
+    dplyr::mutate(gene_label = ifelse(hgnc_symbol != "", hgnc_symbol, gene)) %>%
+    dplyr::select(cluster, gene_label, avg_log2FC, pct.1, pct.2)
+} else {
+  message("Marker discovery skipped. Set RUN_MARKERS <- TRUE to run it.")
+}
+```
+
+# Gene boxplots
+
+**Why these genes:**
+
+- `EPCAM` and `KRT19` flag epithelial programs.
+- `VIM` points to mesenchymal-like states.
+- `MKI67` and `TOP2A` highlight cycling / proliferative clusters.
+- `ERBB2` and `ESR1` map onto HER2/ER signaling that’s central in breast cancer.
+
+```{r gene-boxplots}
+plot_genes_sym <- symbol_sets$PlotGenes
+plot_gene_labels <- setNames(plot_genes_sym, symbol_to_ens[plot_genes_sym])
+plot_gene_labels <- plot_gene_labels[!is.na(names(plot_gene_labels))]
+plot_genes <- names(plot_gene_labels)
+
+expr <- FetchData(bc, vars = c("seurat_clusters", plot_genes))
+expr_long <- expr %>%
+  pivot_longer(cols = all_of(plot_genes), names_to = "gene", values_to = "expr")
+
+expr_long$seurat_clusters <- factor(expr_long$seurat_clusters)
+expr_long$gene <- plot_gene_labels[expr_long$gene]
+
+p <- ggplot(expr_long, aes(x = seurat_clusters, y = expr, fill = seurat_clusters)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.85) +
+  geom_jitter(size = 0.2, width = 0.2, alpha = 0.25) +
+  facet_wrap(~ gene, scales = "free_y") +
+  scale_fill_viridis_d() +
+  labs(x = "Cluster", y = "Expression") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "none")
+
+p
+```
+
+# What else you can do next
+
+- Integrate with bulk RNA-seq or drug response data to connect expression states to sensitivity.
+- Run pathway enrichment on each cluster for cleaner biological narratives.
+- Compare these cell-line states to patient tumor single-cell datasets to see what carries over.
+
+# Summary
+
+This analysis maps single-cell structure across 32 breast cancer cell lines, highlights major expression states (epithelial, mesenchymal, proliferative, stress), and backs the cluster interpretation with markers and targeted gene plots. It’s a compact example of how to go from raw counts to a story you can actually explain.

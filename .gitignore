@@ -10,6 +10,7 @@ renv/python/
 
 # Data and outputs
 /data/
+**/data/
 outputs/
 notebooks/data/
 notebooks/outputs/

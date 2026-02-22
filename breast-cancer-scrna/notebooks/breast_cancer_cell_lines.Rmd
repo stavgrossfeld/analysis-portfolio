@@ -62,7 +62,7 @@ head(bc@meta.data)
 
 I keep the QC story simple: remove empty droplets and clear low-quality cells. I’m not doing aggressive filtering because these are cell lines, but I still want to avoid obvious junk.
 
-```{r qc-metrics}
+```{r qc-metrics, fig.width=11, fig.height=4}
 bc[["percent.mt"]] <- PercentageFeatureSet(bc, pattern = "^MT-")
 
 VlnPlot(bc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
@@ -89,14 +89,14 @@ VariableFeaturePlot(bc)
 
 PCA → UMAP → clustering. I keep the resolution moderate to avoid splitting cell lines into tiny micro-clusters unless the data strongly supports it.
 
-```{r pca-umap}
+```{r pca-umap, fig.width=8, fig.height=5}
 bc <- ScaleData(bc, features = VariableFeatures(bc))
 bc <- RunPCA(bc, features = VariableFeatures(bc))
 
 ElbowPlot(bc)
 ```
 
-```{r cluster}
+```{r cluster, fig.width=8, fig.height=6}
 bc <- FindNeighbors(bc, dims = 1:30)
 bc <- FindClusters(bc, resolution = 0.4)
 bc <- RunUMAP(bc, dims = 1:30)
@@ -108,7 +108,7 @@ DimPlot(bc, reduction = "umap", label = TRUE) + NoLegend()
 
 The barcode prefix encodes cell-line identity, so I keep it as a grouping label.
 
-```{r cell-line-umap}
+```{r cell-line-umap, fig.width=9, fig.height=6}
 DimPlot(bc, reduction = "umap", group.by = "cell_line", label = FALSE) +
   guides(color = guide_legend(override.aes = list(size = 3), ncol = 2))
 ```
@@ -147,7 +147,7 @@ map_symbols <- function(symbols) {
 }
 ```
 
-```{r cell-cycle}
+```{r cell-cycle, fig.width=8, fig.height=6}
 cc <- Seurat::cc.genes
 
 s_genes <- unname(map_symbols(cc$s.genes))
@@ -183,7 +183,7 @@ symbol_to_ens <- map_symbols(target_symbols)
 
 These scores are not “cell types” in the classical sense, but they help interpret how clusters lean along common cancer state axes.
 
-```{r state-scores}
+```{r state-scores, fig.width=10, fig.height=8}
 state_sets <- lapply(symbol_sets[names(symbol_sets) != "PlotGenes"], function(g) unname(symbol_to_ens[g]))
 state_sets <- lapply(state_sets, function(g) g[!is.na(g)])
 state_sets <- state_sets[lengths(state_sets) > 0]
@@ -204,7 +204,7 @@ if (length(score_cols) > 0) {
 }
 ```
 
-```{r state-labels}
+```{r state-labels, fig.width=8, fig.height=6}
 if (length(score_cols) > 0) {
   score_df <- bc@meta.data %>%
     dplyr::select(seurat_clusters, all_of(score_cols)) %>%
@@ -270,7 +270,7 @@ if (RUN_MARKERS) {
 - `MKI67` and `TOP2A` highlight cycling / proliferative clusters.
 - `ERBB2` and `ESR1` map onto HER2/ER signaling that’s central in breast cancer.
 
-```{r gene-boxplots}
+```{r gene-boxplots, fig.width=11, fig.height=7}
 plot_genes_sym <- symbol_sets$PlotGenes
 plot_gene_labels <- setNames(plot_genes_sym, symbol_to_ens[plot_genes_sym])
 plot_gene_labels <- plot_gene_labels[!is.na(names(plot_gene_labels))]
@@ -293,6 +293,23 @@ p <- ggplot(expr_long, aes(x = seurat_clusters, y = expr, fill = seurat_clusters
   theme(legend.position = "none")
 
 p
+```
+
+# Quick validation checks
+
+These are lightweight checks to make sure the structure isn’t driven by QC artifacts.
+
+```{r validation-qc, fig.width=11, fig.height=4}
+FeatureScatter(bc, feature1 = "nCount_RNA", feature2 = "percent.mt") +
+  FeatureScatter(bc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+```
+
+```{r validation-umap, fig.width=9, fig.height=6}
+FeaturePlot(bc, features = c("nCount_RNA", "percent.mt"), ncol = 2)
+```
+
+```{r validation-cluster-qc, fig.width=10, fig.height=5}
+VlnPlot(bc, features = c("nCount_RNA", "percent.mt"), group.by = "seurat_clusters", ncol = 2)
 ```
 
 # What else you can do next

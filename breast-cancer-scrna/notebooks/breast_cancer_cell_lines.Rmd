@@ -270,7 +270,7 @@ if (RUN_MARKERS) {
 - `MKI67` and `TOP2A` highlight cycling / proliferative clusters.
 - `ERBB2` and `ESR1` map onto HER2/ER signaling that’s central in breast cancer.
 
-```{r gene-boxplots, fig.width=11, fig.height=16}
+```{r gene-boxplots, fig.width=11, fig.height=18}
 plot_genes_sym <- symbol_sets$PlotGenes
 plot_gene_labels <- setNames(plot_genes_sym, symbol_to_ens[plot_genes_sym])
 plot_gene_labels <- plot_gene_labels[!is.na(names(plot_gene_labels))]
@@ -283,15 +283,16 @@ expr_long <- expr %>%
 expr_long$seurat_clusters <- factor(expr_long$seurat_clusters)
 expr_long$gene <- plot_gene_labels[expr_long$gene]
 
-p <- ggplot(expr_long, aes(x = seurat_clusters, y = expr, fill = seurat_clusters)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.85) +
-  geom_jitter(size = 0.2, width = 0.2, alpha = 0.25) +
-  facet_wrap(~ gene, scales = "free_y", ncol = 1) +
-  scale_fill_viridis_d() +
-  labs(x = "Cluster", y = "Expression") +
-  theme_minimal(base_size = 11)
+plot_list <- lapply(unique(expr_long$gene), function(g) {
+  ggplot(filter(expr_long, gene == g), aes(x = seurat_clusters, y = expr, fill = seurat_clusters)) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.85) +
+    geom_jitter(size = 0.2, width = 0.2, alpha = 0.25) +
+    scale_fill_viridis_d() +
+    labs(title = g, x = "Cluster", y = "Expression") +
+    theme_minimal(base_size = 11)
+})
 
-p
+wrap_plots(plot_list, ncol = 1)
 ```
 
 # Quick validation checks

@@ -101,7 +101,7 @@ bc <- FindNeighbors(bc, dims = 1:30)
 bc <- FindClusters(bc, resolution = 0.4)
 bc <- RunUMAP(bc, dims = 1:30)
 
-DimPlot(bc, reduction = "umap", label = TRUE) + NoLegend()
+DimPlot(bc, reduction = "umap", label = TRUE)
 ```
 
 # Cell line context
@@ -198,7 +198,7 @@ score_cols <- paste0(names(state_sets), "1")
 score_cols <- score_cols[score_cols %in% colnames(bc@meta.data)]
 
 if (length(score_cols) > 0) {
-  FeaturePlot(bc, features = score_cols, ncol = 2)
+FeaturePlot(bc, features = score_cols, ncol = 2)
 } else {
   message("State scores skipped: no score columns were created.")
 }
@@ -270,7 +270,7 @@ if (RUN_MARKERS) {
 - `MKI67` and `TOP2A` highlight cycling / proliferative clusters.
 - `ERBB2` and `ESR1` map onto HER2/ER signaling that’s central in breast cancer.
 
-```{r gene-boxplots, fig.width=11, fig.height=7}
+```{r gene-boxplots, fig.width=11, fig.height=16}
 plot_genes_sym <- symbol_sets$PlotGenes
 plot_gene_labels <- setNames(plot_genes_sym, symbol_to_ens[plot_genes_sym])
 plot_gene_labels <- plot_gene_labels[!is.na(names(plot_gene_labels))]
@@ -286,11 +286,10 @@ expr_long$gene <- plot_gene_labels[expr_long$gene]
 p <- ggplot(expr_long, aes(x = seurat_clusters, y = expr, fill = seurat_clusters)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.85) +
   geom_jitter(size = 0.2, width = 0.2, alpha = 0.25) +
-  facet_wrap(~ gene, scales = "free_y") +
+  facet_wrap(~ gene, scales = "free_y", ncol = 1) +
   scale_fill_viridis_d() +
   labs(x = "Cluster", y = "Expression") +
-  theme_minimal(base_size = 11) +
-  theme(legend.position = "none")
+  theme_minimal(base_size = 11)
 
 p
 ```

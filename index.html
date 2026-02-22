@@ -12,6 +12,7 @@
       --muted: #b8b8b8;
       --accent: #7bdcb5;
       --accent-2: #6fb6ff;
+      --accent-3: #f6d365;
     }
     * { box-sizing: border-box; }
     body {
@@ -21,9 +22,9 @@
       color: var(--text);
     }
     .wrap {
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
-      padding: 48px 20px 80px;
+      padding: 48px 20px 90px;
     }
     header {
       display: grid;
@@ -32,16 +33,17 @@
     }
     h1 {
       margin: 0;
-      font-size: 40px;
+      font-size: 42px;
       letter-spacing: 0.3px;
     }
     p.lead {
       margin: 0;
       color: var(--muted);
       font-size: 18px;
-      line-height: 1.5;
+      line-height: 1.6;
+      max-width: 760px;
     }
-    .grid {
+    .row {
       display: grid;
       gap: 18px;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -88,6 +90,25 @@
       font-weight: 700;
       font-size: 14px;
     }
+    .button.alt { background: var(--accent-3); }
+    .section {
+      margin-top: 28px;
+    }
+    .section h3 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+      color: #d7e3ff;
+      letter-spacing: 0.2px;
+    }
+    .post {
+      background: #12151c;
+      border: 1px solid #222734;
+      border-radius: 14px;
+      padding: 16px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .post strong { color: var(--text); }
     footer {
       margin-top: 40px;
       color: var(--muted);
@@ -99,17 +120,35 @@
   <div class="wrap">
     <header>
       <h1>Analysis Portfolio</h1>
-      <p class="lead">Selected analysis projects with reproducible workflows, clean visuals, and shareable outputs.</p>
+      <p class="lead">Selected analysis projects with reproducible workflows, clean visuals, and shareable outputs. I focus on building pipelines that are readable, traceable, and easy to hand off.</p>
     </header>
 
-    <section class="grid">
+    <section class="row">
       <article class="card">
         <span class="tag">scRNA-seq</span>
         <h2>PBMC 3k Pipeline</h2>
         <p>End-to-end single-cell pipeline with QC, normalization, PCA/UMAP, clustering, marker discovery, and manual cell-type labels. Includes Arrow outputs and a reproducible runbook.</p>
-        <a class="button" href="pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html">View report</a>
-        <a class="button" href="pbmc3k-scrna/README.md">Project README</a>
+        <div>
+          <a class="button" href="pbmc3k-scrna/notebooks/pbmc3k_arrow_pipeline.html">View report</a>
+          <a class="button alt" href="pbmc3k-scrna/README.md">Project README</a>
+        </div>
       </article>
+    </section>
+
+    <section class="section">
+      <h3>LinkedIn Post Draft</h3>
+      <div class="post">
+        <strong>Just shipped a full single‑cell RNA‑seq pipeline on PBMC 3k and published it as a clean, reproducible analysis artifact.</strong><br><br>
+        What’s inside:
+        <br>- QC → normalization → HVG selection → PCA/UMAP → clustering → marker discovery
+        <br>- Manual cell‑type labeling using canonical PBMC markers
+        <br>- Arrow/Feather exports for portable downstream use
+        <br>- A runbook so anyone can reproduce the results end‑to‑end
+        <br><br>
+        I wanted this to feel like something you’d actually hand off in a real team: clear assumptions, reproducible steps, and outputs that can feed the next stage without rework.
+        <br><br>
+        If you’re doing scRNA‑seq, data tooling, or pipeline design, I’d love feedback. I’ll drop the GitHub link in the comments.
+      </div>
     </section>
 
     <footer>

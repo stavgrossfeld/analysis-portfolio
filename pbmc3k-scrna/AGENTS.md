@@ -21,7 +21,7 @@ This file documents how to reproduce the analysis and rendered HTML.
 
 ## Install dependencies (shared renv + pak)
 ```bash
-/Library/Frameworks/R.framework/Resources/bin/R -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv", repos="https://cloud.r-project.org"); renv::activate("/Users/stav/repos/analysis-portfolio"); renv::settings$snapshot.type("explicit"); renv::install("pak"); pak::pkg_install(c("Seurat","Matrix","ggplot2","dplyr","SeuratObject","patchwork","cowplot","ggrepel","ggridges","plotly","sctransform","igraph","uwot","reticulate","arrow")); renv::snapshot()'
+/Library/Frameworks/R.framework/Resources/bin/R -e 'if (!requireNamespace("renv", quietly=TRUE)) install.packages("renv", repos="https://cloud.r-project.org"); renv::activate("/Users/stav/repos/analysis-portfolio"); renv::settings$snapshot.type("explicit"); renv::install("pak"); pak::pkg_install(c("Seurat","Matrix","ggplot2","dplyr","SeuratObject","patchwork","cowplot","ggrepel","ggridges","plotly","sctransform","igraph","uwot","reticulate","arrow","DESeq2")); renv::snapshot()'
 ```
 
 ## Download dataset

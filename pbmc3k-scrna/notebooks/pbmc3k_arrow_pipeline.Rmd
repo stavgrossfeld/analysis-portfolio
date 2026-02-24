@@ -7,7 +7,7 @@ output: html_document
 # Install dependencies via pak (preferred)
 # Set SKIP_PAK_INSTALL=1 to skip install during render.
 # Set SKIP_R_RUN=1 to render without executing code chunks.
-required_pkgs <- c("Seurat", "Matrix", "ggplot2", "dplyr", "tidyr", "arrow")
+required_pkgs <- c("Seurat", "Matrix", "ggplot2", "dplyr", "tidyr", "arrow", "DESeq2")
 if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak")
 }
@@ -160,8 +160,56 @@ DimPlot(seu, reduction = "umap", label = TRUE)
 **Notes:** Differential expression across clusters highlights signature genes that can be matched to known cell types or used to discover novel states.
 
 ```{r markers}
-markers <- FindAllMarkers(seu, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+message("Running DESeq2 marker tests (output condensed)...")
+invisible(capture.output(
+  markers <- suppressMessages(FindAllMarkers(
+    seu,
+    only.pos = TRUE,
+    min.pct = 0.25,
+    logfc.threshold = 0.25,
+    test.use = "DESeq2",
+    verbose = FALSE
+  )),
+  file = nullfile()
+))
 head(markers, 10)
+```
+
+## DESeq2 Marker Plot
+
+**What happens here:** Visualize DESeq2 marker test significance per cluster.
+
+**Why this matters:** It makes the DESeq2-based marker ranking visible rather than only showing raw tables.
+
+```{r deseq2_marker_plot, fig.width=10, fig.height=7}
+marker_plot_df <- markers %>%
+  filter(!is.na(p_val_adj), !is.na(avg_log2FC)) %>%
+  mutate(
+    cluster = factor(cluster),
+    neg_log10_padj = -log10(pmax(p_val_adj, 1e-300))
+  )
+
+label_df <- marker_plot_df %>%
+  group_by(cluster) %>%
+  slice_max(order_by = avg_log2FC, n = 2, with_ties = FALSE) %>%
+  ungroup()
+
+ggplot(marker_plot_df, aes(x = avg_log2FC, y = neg_log10_padj)) +
+  geom_point(alpha = 0.35, size = 0.7, color = "#1f78b4") +
+  facet_wrap(~ cluster, scales = "free_y") +
+  geom_text(
+    data = label_df,
+    aes(label = gene),
+    size = 2.4,
+    vjust = -0.5,
+    check_overlap = TRUE
+  ) +
+  labs(
+    title = "DESeq2 marker significance by cluster",
+    x = "avg_log2FC",
+    y = "-log10(adjusted p-value)"
+  ) +
+  theme_bw()
 ```
 
 ## Putative Cell‑Type Labels (Manual)
@@ -250,10 +298,3 @@ cluster_tbl$cell_id <- rownames(seu@meta.data)
 
 arrow::write_feather(cluster_tbl, file.path(ARROW_DIR, "cell_clusters.feather"))
 ```
-
-## Portfolio Notes
-
-Suggested talking points for GitHub/LinkedIn:
-- Built an end-to-end single-cell pipeline in Seurat (QC → normalization → PCA/UMAP → clustering → markers)
-- Used Apache Arrow/Feather to persist QC and cluster tables for fast handoff
-- Reproducible workflow with clear data access and outputs

@@ -25,7 +25,7 @@ GitHub source (Markdown/HTML in repo):
 The notebook installs deps with `pak` automatically. If you want to install manually:
 ```r
 if (!requireNamespace("pak", quietly = TRUE)) install.packages("pak")
-pak::pkg_install(c("Seurat", "Matrix", "ggplot2", "dplyr", "arrow"))
+pak::pkg_install(c("Seurat", "Matrix", "ggplot2", "dplyr", "arrow", "DESeq2"))
 ```
 
 ### Run

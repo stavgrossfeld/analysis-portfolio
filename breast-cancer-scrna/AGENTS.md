@@ -26,7 +26,7 @@ Use the shared repo-level `renv`:
 ```
 /Library/Frameworks/R.framework/Resources/bin/R -q -e "renv::init(bare=TRUE)"
 /Library/Frameworks/R.framework/Resources/bin/R -q -e "install.packages('pak', repos='https://cloud.r-project.org')"
-/Library/Frameworks/R.framework/Resources/bin/R -q -e "pak::pkg_install(c('Seurat','dplyr','ggplot2','patchwork','tidyr','stringr','viridis','biomaRt'))"
+/Library/Frameworks/R.framework/Resources/bin/R -q -e "pak::pkg_install(c('Seurat','dplyr','ggplot2','patchwork','tidyr','stringr','viridis','biomaRt','DESeq2'))"
 /Library/Frameworks/R.framework/Resources/bin/R -q -e "renv::snapshot()"
 ```
 

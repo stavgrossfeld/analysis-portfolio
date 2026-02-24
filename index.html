@@ -118,6 +118,7 @@
       <p><strong>Highlights:</strong></p>
       <ul>
         <li>QC → PCA/UMAP → clustering with cell‑line context from barcodes</li>
+        <li>DESeq2-backed marker discovery with per-cluster significance plots</li>
         <li>State scoring (epithelial/mesenchymal/proliferative/stress)</li>
         <li>Gene‑level boxplots for HER2/ER signaling and cell‑cycle markers</li>
       </ul>
@@ -133,7 +134,8 @@
       <p>Just shipped a full single‑cell RNA‑seq pipeline on PBMC 3k and published it as a clean, reproducible analysis artifact.</p>
       <p><strong>What’s inside:</strong></p>
       <ul>
-        <li>QC → normalization → HVG selection → PCA/UMAP → clustering → marker discovery</li>
+        <li>QC → normalization → HVG selection → PCA/UMAP → clustering → DESeq2 marker discovery</li>
+        <li>DESeq2 marker significance plots for cluster-level interpretation</li>
         <li>Manual cell‑type labeling using canonical PBMC markers</li>
         <li>Arrow/Feather exports for portable downstream use</li>
         <li>A runbook so anyone can reproduce the results end‑to‑end</li>

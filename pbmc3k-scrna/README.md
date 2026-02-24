@@ -4,7 +4,8 @@ Portfolio-ready single-cell RNA-seq analysis pipeline using a Kaggle dataset and
 
 ## What This Does
 - Loads PBMC 3k scRNA-seq data from Kaggle
-- Runs QC, normalization, PCA, UMAP, clustering, marker genes
+- Runs QC, normalization, PCA, UMAP, clustering, and DESeq2-backed marker discovery
+- Includes DESeq2 marker significance plots for per-cluster interpretation
 - Writes Arrow artifacts for fast, portable intermediate storage
 
 ## Dataset

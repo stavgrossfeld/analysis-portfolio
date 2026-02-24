@@ -1,6 +1,6 @@
 # Breast Cancer Cell Lines scRNA-seq
 
-Single-cell analysis of 32 human breast cancer cell lines (GSE173634). The notebook walks through QC, clustering, marker discovery, and state scoring (epithelial, mesenchymal, proliferative, stress), with gene-level boxplots to anchor the interpretation.
+Single-cell analysis of 32 human breast cancer cell lines (GSE173634). The notebook walks through QC, clustering, DESeq2-backed marker discovery (including per-cluster marker significance plots), and state scoring (epithelial, mesenchymal, proliferative, stress), with gene-level boxplots to anchor the interpretation.
 
 ## Project artifacts
 

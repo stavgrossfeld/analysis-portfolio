@@ -26,6 +26,10 @@ suppressPackageStartupMessages({
   library(viridis)
 })
 
+if (!requireNamespace("xgboost", quietly = TRUE)) {
+  stop("This notebook requires xgboost for the ML section. Install with pak::pkg_install('xgboost').")
+}
+
 root_dir <- normalizePath(file.path(".."))
 mtx_dir <- file.path(root_dir, "data", "MTX_FMT_GSE173634")
 mtx_file <- file.path(mtx_dir, "matrix.mtx")
@@ -144,6 +148,106 @@ The barcode prefix encodes cell-line identity, so I keep it as a grouping label.
 ```{r cell-line-umap, fig.width=9, fig.height=6}
 DimPlot(bc, reduction = "umap", group.by = "cell_line", label = FALSE) +
   guides(color = guide_legend(override.aes = list(size = 3), ncol = 2))
+```
+
+# XGBoost: Cell-line prediction
+
+Train a multiclass XGBoost model to predict cell-line identity from expression profiles.
+
+```{r xgboost-cell-line}
+set.seed(7)
+
+ml_features <- head(VariableFeatures(bc), 800)
+if (length(ml_features) < 50) {
+  stop("Not enough variable features available for XGBoost.")
+}
+
+ml_df <- FetchData(bc, vars = c("cell_line", ml_features))
+
+# Keep runtime practical by balancing and capping cells per line.
+ml_df <- ml_df %>%
+  mutate(row_id = dplyr::row_number()) %>%
+  group_by(cell_line) %>%
+  mutate(.rand = runif(dplyr::n())) %>%
+  arrange(.rand, .by_group = TRUE) %>%
+  mutate(.grp_rank = row_number()) %>%
+  filter(.grp_rank <= 300) %>%
+  select(-.rand, -.grp_rank) %>%
+  ungroup()
+
+train_idx <- ml_df %>%
+  group_by(cell_line) %>%
+  group_map(~ sample(.x$row_id, size = max(1, floor(0.8 * nrow(.x))))) %>%
+  unlist(use.names = FALSE)
+
+labels_factor <- factor(ml_df$cell_line)
+labels_num <- as.integer(labels_factor) - 1
+
+x_mat <- as.matrix(ml_df[, ml_features, drop = FALSE])
+train_mask <- ml_df$row_id %in% train_idx
+
+dtrain <- xgboost::xgb.DMatrix(data = x_mat[train_mask, , drop = FALSE], label = labels_num[train_mask])
+dtest <- xgboost::xgb.DMatrix(data = x_mat[!train_mask, , drop = FALSE], label = labels_num[!train_mask])
+
+params <- list(
+  objective = "multi:softprob",
+  num_class = nlevels(labels_factor),
+  eval_metric = "mlogloss",
+  eta = 0.1,
+  max_depth = 6,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+xgb_model <- xgboost::xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 120,
+  watchlist = list(train = dtrain, test = dtest),
+  early_stopping_rounds = 15,
+  verbose = 0
+)
+
+pred_prob <- matrix(
+  xgboost::predict(xgb_model, dtest),
+  ncol = nlevels(labels_factor),
+  byrow = TRUE
+)
+pred_num <- max.col(pred_prob) - 1
+truth_num <- labels_num[!train_mask]
+
+xgb_accuracy <- mean(pred_num == truth_num)
+xgb_accuracy
+
+pred_lab <- factor(pred_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
+truth_lab <- factor(truth_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
+
+conf_mat <- table(truth = truth_lab, pred = pred_lab)
+conf_mat
+```
+
+# XGBoost: Top predictive genes
+
+Rank genes by XGBoost gain importance to identify strong differentiators between cell lines.
+
+```{r xgboost-importance, fig.width=9, fig.height=6}
+imp <- xgboost::xgb.importance(model = xgb_model)
+top_imp <- imp %>%
+  as_tibble() %>%
+  dplyr::slice_head(n = 25)
+
+top_imp %>%
+  dplyr::select(Feature, Gain, Cover, Frequency)
+
+ggplot(top_imp, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_col(fill = "#1f78b4", alpha = 0.9) +
+  coord_flip() +
+  labs(
+    title = "Top XGBoost features for cell-line classification",
+    x = "Gene (feature)",
+    y = "Gain importance"
+  ) +
+  theme_bw()
 ```
 
 # Cell-cycle scoring

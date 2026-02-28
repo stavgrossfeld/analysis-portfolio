@@ -157,7 +157,7 @@ Train a multiclass XGBoost model to predict cell-line identity from expression p
 ```{r xgboost-cell-line}
 set.seed(7)
 
-ml_features <- head(VariableFeatures(bc), 800)
+ml_features <- head(VariableFeatures(bc), 400)
 if (length(ml_features) < 50) {
   stop("Not enough variable features available for XGBoost.")
 }
@@ -171,8 +171,8 @@ ml_df <- ml_df %>%
   mutate(.rand = runif(dplyr::n())) %>%
   arrange(.rand, .by_group = TRUE) %>%
   mutate(.grp_rank = row_number()) %>%
-  filter(.grp_rank <= 300) %>%
-  select(-.rand, -.grp_rank) %>%
+  filter(.grp_rank <= 150) %>%
+  dplyr::select(-.rand, -.grp_rank) %>%
   ungroup()
 
 train_idx <- ml_df %>%
@@ -193,8 +193,8 @@ params <- list(
   objective = "multi:softprob",
   num_class = nlevels(labels_factor),
   eval_metric = "mlogloss",
-  eta = 0.1,
-  max_depth = 6,
+  eta = 0.15,
+  max_depth = 4,
   subsample = 0.8,
   colsample_bytree = 0.8
 )
@@ -202,14 +202,14 @@ params <- list(
 xgb_model <- xgboost::xgb.train(
   params = params,
   data = dtrain,
-  nrounds = 120,
+  nrounds = 60,
   watchlist = list(train = dtrain, test = dtest),
-  early_stopping_rounds = 15,
+  early_stopping_rounds = 8,
   verbose = 0
 )
 
 pred_prob <- matrix(
-  xgboost::predict(xgb_model, dtest),
+  predict(xgb_model, dtest),
   ncol = nlevels(labels_factor),
   byrow = TRUE
 )

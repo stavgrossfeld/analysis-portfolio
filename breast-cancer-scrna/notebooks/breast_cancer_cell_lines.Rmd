@@ -150,106 +150,6 @@ DimPlot(bc, reduction = "umap", group.by = "cell_line", label = FALSE) +
   guides(color = guide_legend(override.aes = list(size = 3), ncol = 2))
 ```
 
-# XGBoost: Cell-line prediction
-
-Train a multiclass XGBoost model to predict cell-line identity from expression profiles.
-
-```{r xgboost-cell-line}
-set.seed(7)
-
-ml_features <- head(VariableFeatures(bc), 400)
-if (length(ml_features) < 50) {
-  stop("Not enough variable features available for XGBoost.")
-}
-
-ml_df <- FetchData(bc, vars = c("cell_line", ml_features))
-
-# Keep runtime practical by balancing and capping cells per line.
-ml_df <- ml_df %>%
-  mutate(row_id = dplyr::row_number()) %>%
-  group_by(cell_line) %>%
-  mutate(.rand = runif(dplyr::n())) %>%
-  arrange(.rand, .by_group = TRUE) %>%
-  mutate(.grp_rank = row_number()) %>%
-  filter(.grp_rank <= 150) %>%
-  dplyr::select(-.rand, -.grp_rank) %>%
-  ungroup()
-
-train_idx <- ml_df %>%
-  group_by(cell_line) %>%
-  group_map(~ sample(.x$row_id, size = max(1, floor(0.8 * nrow(.x))))) %>%
-  unlist(use.names = FALSE)
-
-labels_factor <- factor(ml_df$cell_line)
-labels_num <- as.integer(labels_factor) - 1
-
-x_mat <- as.matrix(ml_df[, ml_features, drop = FALSE])
-train_mask <- ml_df$row_id %in% train_idx
-
-dtrain <- xgboost::xgb.DMatrix(data = x_mat[train_mask, , drop = FALSE], label = labels_num[train_mask])
-dtest <- xgboost::xgb.DMatrix(data = x_mat[!train_mask, , drop = FALSE], label = labels_num[!train_mask])
-
-params <- list(
-  objective = "multi:softprob",
-  num_class = nlevels(labels_factor),
-  eval_metric = "mlogloss",
-  eta = 0.15,
-  max_depth = 4,
-  subsample = 0.8,
-  colsample_bytree = 0.8
-)
-
-xgb_model <- xgboost::xgb.train(
-  params = params,
-  data = dtrain,
-  nrounds = 60,
-  watchlist = list(train = dtrain, test = dtest),
-  early_stopping_rounds = 8,
-  verbose = 0
-)
-
-pred_prob <- matrix(
-  predict(xgb_model, dtest),
-  ncol = nlevels(labels_factor),
-  byrow = TRUE
-)
-pred_num <- max.col(pred_prob) - 1
-truth_num <- labels_num[!train_mask]
-
-xgb_accuracy <- mean(pred_num == truth_num)
-xgb_accuracy
-
-pred_lab <- factor(pred_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
-truth_lab <- factor(truth_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
-
-conf_mat <- table(truth = truth_lab, pred = pred_lab)
-conf_mat
-```
-
-# XGBoost: Top predictive genes
-
-Rank genes by XGBoost gain importance to identify strong differentiators between cell lines.
-
-```{r xgboost-importance, fig.width=9, fig.height=6}
-imp <- xgboost::xgb.importance(model = xgb_model)
-top_imp <- imp %>%
-  as_tibble() %>%
-  dplyr::slice_head(n = 25)
-
-top_imp %>%
-  dplyr::select(Feature, Gain, Cover, Frequency)
-
-ggplot(top_imp, aes(x = reorder(Feature, Gain), y = Gain)) +
-  geom_col(fill = "#1f78b4", alpha = 0.9) +
-  coord_flip() +
-  labs(
-    title = "Top XGBoost features for cell-line classification",
-    x = "Gene (feature)",
-    y = "Gain importance"
-  ) +
-  theme_bw()
-```
-
 # Cell-cycle scoring
 
 This adds some biological context that’s often hidden in raw clusters.
@@ -314,6 +214,124 @@ symbol_sets <- list(
 target_symbols <- unique(unlist(symbol_sets))
 
 symbol_to_ens <- map_symbols(target_symbols)
+```
+
+# XGBoost: Cell-line prediction
+
+Train a multiclass XGBoost model to predict cell-line identity from expression profiles.
+
+```{r xgboost-cell-line}
+set.seed(7)
+
+ml_features <- head(VariableFeatures(bc), 400)
+if (length(ml_features) < 50) {
+  stop("Not enough variable features available for XGBoost.")
+}
+
+feature_map <- biomaRt::getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = unique(ml_features),
+  mart = mart
+) %>%
+  dplyr::filter(hgnc_symbol != "") %>%
+  dplyr::distinct(ensembl_gene_id, .keep_all = TRUE)
+
+feature_label_map <- setNames(feature_map$hgnc_symbol, feature_map$ensembl_gene_id)
+feature_display <- ifelse(
+  ml_features %in% names(feature_label_map),
+  feature_label_map[ml_features],
+  ml_features
+)
+feature_display <- make.unique(feature_display)
+
+ml_df <- FetchData(bc, vars = c("cell_line", ml_features))
+colnames(ml_df) <- c("cell_line", feature_display)
+
+# Keep runtime practical by balancing and capping cells per line.
+ml_df <- ml_df %>%
+  mutate(row_id = dplyr::row_number()) %>%
+  group_by(cell_line) %>%
+  mutate(.rand = runif(dplyr::n())) %>%
+  arrange(.rand, .by_group = TRUE) %>%
+  mutate(.grp_rank = row_number()) %>%
+  filter(.grp_rank <= 150) %>%
+  dplyr::select(-.rand, -.grp_rank) %>%
+  ungroup()
+
+train_idx <- ml_df %>%
+  group_by(cell_line) %>%
+  group_map(~ sample(.x$row_id, size = max(1, floor(0.8 * nrow(.x))))) %>%
+  unlist(use.names = FALSE)
+
+labels_factor <- factor(ml_df$cell_line)
+labels_num <- as.integer(labels_factor) - 1
+
+x_mat <- as.matrix(ml_df[, feature_display, drop = FALSE])
+train_mask <- ml_df$row_id %in% train_idx
+
+dtrain <- xgboost::xgb.DMatrix(data = x_mat[train_mask, , drop = FALSE], label = labels_num[train_mask])
+dtest <- xgboost::xgb.DMatrix(data = x_mat[!train_mask, , drop = FALSE], label = labels_num[!train_mask])
+
+params <- list(
+  objective = "multi:softprob",
+  num_class = nlevels(labels_factor),
+  eval_metric = "mlogloss",
+  eta = 0.15,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+xgb_model <- xgboost::xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 60,
+  watchlist = list(train = dtrain, test = dtest),
+  early_stopping_rounds = 8,
+  verbose = 0
+)
+
+pred_prob <- matrix(
+  predict(xgb_model, dtest),
+  ncol = nlevels(labels_factor),
+  byrow = TRUE
+)
+pred_num <- max.col(pred_prob) - 1
+truth_num <- labels_num[!train_mask]
+
+xgb_accuracy <- mean(pred_num == truth_num)
+xgb_accuracy
+
+pred_lab <- factor(pred_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
+truth_lab <- factor(truth_num + 1, levels = seq_len(nlevels(labels_factor)), labels = levels(labels_factor))
+
+conf_mat <- table(truth = truth_lab, pred = pred_lab)
+conf_mat
+```
+
+# XGBoost: Top predictive genes
+
+Rank genes by XGBoost gain importance to identify strong differentiators between cell lines.
+
+```{r xgboost-importance, fig.width=9, fig.height=6}
+imp <- xgboost::xgb.importance(model = xgb_model)
+top_imp <- imp %>%
+  as_tibble() %>%
+  dplyr::slice_head(n = 25)
+
+top_imp %>%
+  dplyr::select(Feature, Gain, Cover, Frequency)
+
+ggplot(top_imp, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_col(fill = "#1f78b4", alpha = 0.9) +
+  coord_flip() +
+  labs(
+    title = "Top XGBoost features for cell-line classification",
+    x = "Gene symbol (feature)",
+    y = "Gain importance"
+  ) +
+  theme_bw()
 ```
 
 # State scoring (epithelial vs mesenchymal)

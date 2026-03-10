@@ -1,0 +1,615 @@
+---
+title: "GDPx4 DRUG-seq Full Analysis (Rmd + Reticulate + Polars)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+params:
+  max_rows: 0
+  top_n: 50
+  top_compounds_heatmap: 10
+  top_genes_heatmap: 30
+  target_compound: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(reticulate)
+})
+
+root_candidates <- c(
+  normalizePath(getwd(), winslash = "/", mustWork = TRUE),
+  normalizePath(file.path(getwd(), "..", ".."), winslash = "/", mustWork = FALSE)
+)
+project_root <- root_candidates[file.exists(file.path(root_candidates, ".git"))][1]
+if (is.na(project_root) || !nzchar(project_root)) {
+  project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+}
+
+venv_candidates <- c(
+  file.path(project_root, ".venv-gdpx4", "bin", "python"),
+  file.path(getwd(), ".venv-gdpx4", "bin", "python")
+)
+venv_python <- venv_candidates[file.exists(venv_candidates)][1]
+if (is.na(venv_python) || !file.exists(venv_python)) {
+  stop("Missing .venv-gdpx4/bin/python. Create it first.")
+}
+reticulate::use_python(venv_python, required = TRUE)
+
+if (Sys.getenv("HF_TOKEN") == "" && Sys.getenv("HUGGING_FACE_HUB_TOKEN") != "") {
+  Sys.setenv(HF_TOKEN = Sys.getenv("HUGGING_FACE_HUB_TOKEN"))
+}
+if (Sys.getenv("HF_TOKEN") == "" && file.exists(file.path(project_root, ".env"))) {
+  env_lines <- readLines(file.path(project_root, ".env"), warn = FALSE)
+  token_line <- grep("^(HF_TOKEN|HUGGING_FACE_HUB_TOKEN)=", env_lines, value = TRUE)
+  if (length(token_line) > 0) {
+    token <- sub("^(HF_TOKEN|HUGGING_FACE_HUB_TOKEN)=", "", token_line[1])
+    token <- gsub("^['\"]|['\"]$", "", token)
+    Sys.setenv(HF_TOKEN = token)
+  }
+}
+if (Sys.getenv("HF_TOKEN") == "") {
+  stop("Token not set. Add HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) to .env or env.")
+}
+
+out_dir <- file.path(project_root, "gdpx4-drugseq", "outputs")
+fig_dir <- file.path(out_dir, "figures")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+## Full Lazy Polars Aggregation
+
+```{python full_analysis}
+import os
+import numpy as np
+import pandas as pd
+import polars as pl
+from huggingface_hub import hf_hub_download
+
+repo_id = "ginkgo-datapoints/GDPx4"
+filename = "differential_expression.parquet"
+max_rows = int(r.params["max_rows"])
+top_n = int(r.params["top_n"])
+top_compounds_heatmap = int(r.params["top_compounds_heatmap"])
+top_genes_heatmap = int(r.params["top_genes_heatmap"])
+target_compound_param = str(r.params["target_compound"] or "").strip()
+out_dir = str(r.out_dir)
+
+token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
+if not token:
+    raise RuntimeError("HF token not found")
+
+local_parquet = hf_hub_download(
+    repo_id=repo_id,
+    repo_type="dataset",
+    filename=filename,
+    token=token,
+)
+
+lf = pl.scan_parquet(local_parquet)
+columns = lf.collect_schema().names()
+
+
+def pick(cols, candidates):
+    m = {c.lower(): c for c in cols}
+    for c in candidates:
+        if c.lower() in m:
+            return m[c.lower()]
+    return None
+
+compound_col = pick(columns, ["compound", "perturbation", "drug"])
+cell_line_col = pick(columns, ["cell_line", "cellline", "cell_type"])
+gene_col = pick(columns, ["gene_symbol", "gene", "feature"])
+lfc_col = pick(columns, ["log2FoldChange", "log2_fold_change", "log2fc", "lfc"])
+padj_col = pick(columns, ["padj", "adj_pvalue", "qvalue", "fdr"])
+container_col = pick(columns, ["container_id", "container", "well"])
+concentration_col = pick(columns, ["concentration", "dose", "dose_uM"])
+
+required = [compound_col, gene_col, lfc_col]
+if any(c is None for c in required):
+    raise RuntimeError(f"Missing required columns in {columns}")
+
+lf_work = lf.head(max_rows) if max_rows and max_rows > 0 else lf
+
+if padj_col:
+    sig_expr = ((pl.col(lfc_col).abs() >= 1.0) & (pl.col(padj_col) < 0.05)).cast(pl.Int64)
+    min_padj_expr = pl.col(padj_col).min().alias("min_padj")
+else:
+    sig_expr = pl.lit(0).cast(pl.Int64)
+    min_padj_expr = pl.lit(None).alias("min_padj")
+
+compound_aggs = [
+    pl.len().alias("rows"),
+    pl.col(lfc_col).mean().alias("mean_log2fc"),
+    sig_expr.sum().alias("significant_rows"),
+]
+if container_col:
+    compound_aggs.append(pl.col(container_col).n_unique().alias("n_containers"))
+if concentration_col:
+    compound_aggs.append(pl.col(concentration_col).n_unique().alias("n_concentrations"))
+
+compound_df = (
+    lf_work
+    .group_by(compound_col)
+    .agg(compound_aggs)
+    .with_columns((pl.col("significant_rows") / pl.col("rows")).alias("significant_rate"))
+    .with_columns(
+        pl.when(pl.col("n_containers").is_not_null() & (pl.col("n_containers") > 0))
+        .then(pl.col("significant_rows") / pl.col("n_containers"))
+        .otherwise(None)
+        .alias("significant_per_container")
+    )
+    .rename({compound_col: "compound"})
+    .sort("significant_rate", descending=True)
+    .collect()
+    .to_pandas()
+)
+
+# Gene-by-compound aggregate table for biomarker mining.
+gene_compound_aggs = [
+    pl.len().alias("rows"),
+    pl.col(lfc_col).mean().alias("mean_lfc"),
+    pl.col(lfc_col).abs().max().alias("max_abs_lfc"),
+    sig_expr.sum().alias("sig_rows"),
+    min_padj_expr,
+]
+if container_col:
+    gene_compound_aggs.append(pl.col(container_col).n_unique().alias("n_containers"))
+if concentration_col:
+    gene_compound_aggs.append(pl.col(concentration_col).n_unique().alias("n_concentrations"))
+
+gene_compound_df = (
+    lf_work
+    .group_by([gene_col, compound_col])
+    .agg(gene_compound_aggs)
+    .with_columns((pl.col("sig_rows") / pl.col("rows")).alias("sig_rate"))
+    .rename({gene_col: "gene", compound_col: "compound"})
+    .collect()
+)
+
+# Global recurrence biomarkers: genes repeatedly significant across compounds.
+gene_recurrence_df = (
+    gene_compound_df.lazy()
+    .with_columns((pl.col("sig_rows") > 0).cast(pl.Int64).alias("is_sig_compound"))
+    .group_by("gene")
+    .agg([
+        pl.col("is_sig_compound").sum().alias("compounds_with_signal"),
+        pl.col("max_abs_lfc").max().alias("max_abs_lfc"),
+        pl.col("max_abs_lfc").mean().alias("mean_abs_lfc"),
+    ])
+    .with_columns((pl.col("compounds_with_signal") * pl.col("max_abs_lfc")).alias("recurrence_score"))
+    .sort("recurrence_score", descending=True)
+    .collect()
+    .to_pandas()
+)
+
+# Pick top active compound and find its biomarker-like genes.
+if len(compound_df) == 0:
+    raise RuntimeError("No compounds found")
+
+if target_compound_param and (target_compound_param in set(compound_df["compound"].tolist())):
+    top_compound = target_compound_param
+else:
+    top_compound = str(compound_df.iloc[0]["compound"])
+
+dmso_names = [c for c in compound_df["compound"].tolist() if "dmso" in str(c).lower()]
+has_dmso = len(dmso_names) > 0
+
+if has_dmso:
+    dmso_df = (
+        lf_work
+        .filter(pl.col(compound_col).cast(pl.Utf8).str.to_lowercase().str.contains("dmso"))
+        .group_by(gene_col)
+        .agg([
+            pl.col(lfc_col).mean().alias("dmso_mean_lfc"),
+            pl.len().alias("dmso_rows"),
+            *([pl.col(container_col).n_unique().alias("dmso_n_containers")] if container_col else []),
+            *([pl.col(concentration_col).n_unique().alias("dmso_n_concentrations")] if concentration_col else []),
+        ])
+        .rename({gene_col: "gene"})
+        .collect()
+    )
+else:
+    dmso_df = pl.DataFrame(
+        {
+            "gene": pl.Series(name="gene", values=[], dtype=pl.Utf8),
+            "dmso_mean_lfc": pl.Series(name="dmso_mean_lfc", values=[], dtype=pl.Float64),
+            "dmso_rows": pl.Series(name="dmso_rows", values=[], dtype=pl.Int64),
+        }
+    )
+
+# Compound-vs-rest specificity model for biomarkers.
+target_df = (
+    gene_compound_df.lazy()
+    .filter(pl.col("compound") == top_compound)
+    .select([
+        pl.col("gene"),
+        pl.col("mean_lfc").alias("target_mean_lfc"),
+        pl.col("max_abs_lfc").alias("target_max_abs_lfc"),
+        pl.col("sig_rows").alias("target_sig_rows"),
+        pl.col("rows").alias("target_rows"),
+        pl.col("sig_rate").alias("target_sig_rate"),
+        pl.col("min_padj").alias("target_min_padj"),
+        *([pl.col("n_containers").alias("target_n_containers")] if container_col else []),
+        *([pl.col("n_concentrations").alias("target_n_concentrations")] if concentration_col else []),
+    ])
+)
+
+other_df = (
+    gene_compound_df.lazy()
+    .filter(pl.col("compound") != top_compound)
+    .group_by("gene")
+    .agg([
+        pl.col("mean_lfc").abs().mean().alias("other_mean_abs_lfc"),
+        pl.col("max_abs_lfc").max().alias("other_max_abs_lfc"),
+        (pl.col("sig_rows") > 0).cast(pl.Int64).sum().alias("other_sig_compounds"),
+        pl.col("sig_rate").mean().alias("other_mean_sig_rate"),
+    ])
+)
+
+biomarker_df = (
+    target_df
+    .join(other_df, on="gene", how="left")
+    .join(dmso_df.lazy(), on="gene", how="left")
+    .with_columns([
+        pl.col("target_mean_lfc").abs().alias("abs_mean_lfc"),
+        (pl.col("target_mean_lfc").abs() / (pl.col("other_mean_abs_lfc").fill_null(0.0) + 1e-6)).alias("specificity_ratio"),
+        pl.when(pl.col("dmso_mean_lfc").is_not_null())
+          .then(pl.col("target_mean_lfc") - pl.col("dmso_mean_lfc"))
+          .otherwise(pl.col("target_mean_lfc"))
+          .alias("delta_lfc_vs_dmso"),
+    ])
+    .with_columns([
+        pl.when(pl.col("target_min_padj").is_not_null())
+          .then((-1.0) * (pl.col("target_min_padj") + 1e-300).log10())
+          .otherwise(pl.lit(1.0))
+          .alias("target_neg_log10_min_padj"),
+    ])
+    .with_columns([
+        (
+            pl.col("abs_mean_lfc")
+            * (1 + pl.col("target_sig_rate"))
+            * pl.col("target_neg_log10_min_padj")
+            * (1 + (pl.col("specificity_ratio") + 1.0).log())
+            / (1 + pl.col("other_sig_compounds").fill_null(0))
+        ).alias("biomarker_score")
+    ])
+    .filter(pl.col("target_sig_rows") > 0)
+    .filter(pl.col("delta_lfc_vs_dmso").abs() >= 1.0)
+    .filter(pl.col("specificity_ratio") >= 1.5)
+    .filter(pl.col("other_sig_compounds").fill_null(0) <= 25)
+    .sort("biomarker_score", descending=True)
+    .head(top_n)
+    .collect()
+    .to_pandas()
+)
+
+# Coexpression: use highest DE biomarker gene as anchor.
+if len(biomarker_df) > 0:
+    anchor_gene = str(
+        biomarker_df.sort_values("abs_mean_lfc", ascending=False).iloc[0]["gene"]
+    )
+else:
+    anchor_gene = str(gene_recurrence_df.iloc[0]["gene"])
+
+sample_cols = [compound_col]
+if container_col:
+    sample_cols.append(container_col)
+if concentration_col:
+    sample_cols.append(concentration_col)
+
+gene_sample_lf = (
+    lf_work
+    .group_by(sample_cols + [gene_col])
+    .agg(pl.col(lfc_col).mean().alias("gene_lfc"))
+)
+
+anchor_sample_lf = (
+    gene_sample_lf
+    .filter(pl.col(gene_col) == anchor_gene)
+    .select(sample_cols + [pl.col("gene_lfc").alias("anchor_lfc")])
+)
+
+coexpr_df = (
+    gene_sample_lf
+    .join(anchor_sample_lf, on=sample_cols, how="inner")
+    .filter(pl.col(gene_col) != anchor_gene)
+    .group_by(gene_col)
+    .agg([
+        pl.corr("gene_lfc", "anchor_lfc").alias("corr"),
+        pl.len().alias("n_samples"),
+        pl.col("gene_lfc").mean().alias("mean_gene_lfc"),
+        pl.col("anchor_lfc").mean().alias("mean_anchor_lfc"),
+    ])
+    .rename({gene_col: "gene"})
+    .with_columns(pl.col("corr").abs().alias("abs_corr"))
+    .filter(pl.col("corr").is_not_null())
+    .sort("abs_corr", descending=True)
+    .collect()
+    .to_pandas()
+)
+
+top_corr_pairs = coexpr_df.head(40).copy()
+
+# Scatter data for best positive and negative correlated genes.
+if len(coexpr_df) > 0:
+    pos_gene = coexpr_df.sort_values("corr", ascending=False).iloc[0]["gene"]
+    neg_gene = coexpr_df.sort_values("corr", ascending=True).iloc[0]["gene"]
+    scatter_genes = list(dict.fromkeys([pos_gene, neg_gene]))
+else:
+    scatter_genes = []
+
+if scatter_genes:
+    scatter_df = (
+        gene_sample_lf
+        .filter(pl.col(gene_col).is_in(scatter_genes))
+        .join(anchor_sample_lf, on=sample_cols, how="inner")
+        .select([
+            pl.col(gene_col).alias("gene"),
+            pl.col("gene_lfc"),
+            pl.col("anchor_lfc"),
+            *[pl.col(c).cast(pl.Utf8).alias(c) for c in sample_cols],
+        ])
+        .collect()
+        .to_pandas()
+    )
+else:
+    scatter_df = pd.DataFrame(columns=["gene", "gene_lfc", "anchor_lfc"] + sample_cols)
+
+# Heatmap matrix for top compounds x top recurrent genes.
+heatmap_compounds = compound_df.head(top_compounds_heatmap)["compound"].tolist()
+heatmap_genes = gene_recurrence_df.head(top_genes_heatmap)["gene"].tolist()
+
+heatmap_df = (
+    gene_compound_df.lazy()
+    .filter(pl.col("compound").is_in(heatmap_compounds) & pl.col("gene").is_in(heatmap_genes))
+    .select(["gene", "compound", "mean_lfc", "sig_rate"])
+    .collect()
+    .to_pandas()
+)
+
+rows_processed = int(lf_work.select(pl.len().alias("n")).collect()["n"][0])
+unique_compounds = int(lf_work.select(pl.col(compound_col).n_unique().alias("n")).collect()["n"][0])
+unique_genes = int(lf_work.select(pl.col(gene_col).n_unique().alias("n")).collect()["n"][0])
+if cell_line_col:
+    unique_cell_lines = int(lf_work.select(pl.col(cell_line_col).n_unique().alias("n")).collect()["n"][0])
+    cell_lines = lf_work.select(pl.col(cell_line_col).unique().sort()).collect().to_series(0).to_list()
+else:
+    unique_cell_lines = 0
+    cell_lines = []
+
+summary_df = pd.DataFrame([
+    {
+        "rows_processed": rows_processed,
+        "unique_compounds": unique_compounds,
+        "unique_cell_lines": unique_cell_lines,
+        "unique_genes": unique_genes,
+        "cell_lines": ", ".join(cell_lines),
+        "repo_id": repo_id,
+        "file": filename,
+        "target_compound": top_compound,
+        "anchor_gene_for_coexpression": anchor_gene,
+        "n_dmso_compounds_detected": len(dmso_names),
+    }
+])
+
+compound_df.to_csv(os.path.join(out_dir, "gdpx4_compound_summary.csv"), index=False)
+gene_recurrence_df.to_csv(os.path.join(out_dir, "gdpx4_gene_recurrence.csv"), index=False)
+biomarker_df.to_csv(os.path.join(out_dir, "gdpx4_candidate_biomarkers.csv"), index=False)
+coexpr_df.to_csv(os.path.join(out_dir, "gdpx4_anchor_gene_coexpression.csv"), index=False)
+top_corr_pairs.to_csv(os.path.join(out_dir, "gdpx4_anchor_gene_coexpression_top40.csv"), index=False)
+scatter_df.to_csv(os.path.join(out_dir, "gdpx4_anchor_gene_scatter.csv"), index=False)
+heatmap_df.to_csv(os.path.join(out_dir, "gdpx4_heatmap_long.csv"), index=False)
+summary_df.to_csv(os.path.join(out_dir, "gdpx4_rmd_run_summary.csv"), index=False)
+```
+
+## Run Summary
+
+```{r}
+summary_tbl <- read.csv(file.path(out_dir, "gdpx4_rmd_run_summary.csv"), stringsAsFactors = FALSE)
+summary_tbl
+```
+
+## Plot 1: Significant DE Genes Per Compound
+
+```{r}
+compound_tbl <- read.csv(file.path(out_dir, "gdpx4_compound_summary.csv"), stringsAsFactors = FALSE)
+compound_tbl <- compound_tbl[order(-compound_tbl$significant_rows), ]
+compound_tbl$compound <- reorder(compound_tbl$compound, compound_tbl$significant_rows)
+
+p1 <- ggplot(compound_tbl, aes(x = compound, y = significant_rows)) +
+  geom_col(fill = "#2E6F95") +
+  coord_flip() +
+  labs(
+    title = "Significant DE Genes by Compound",
+    subtitle = "Threshold: |log2FC| >= 1 and padj < 0.05",
+    x = NULL,
+    y = "Significant genes"
+  ) +
+  theme_minimal(base_size = 12)
+
+p1
+
+ggsave(file.path(fig_dir, "gdpx4_significant_genes_by_compound.png"), p1, width = 10, height = 6, dpi = 150)
+```
+
+## Plot 2: Significant Rate by Compound
+
+```{r}
+p2 <- ggplot(compound_tbl, aes(x = reorder(compound, significant_rate), y = significant_rate)) +
+  geom_col(fill = "#7AAE42") +
+  coord_flip() +
+  scale_y_continuous(labels = function(x) paste0(round(100 * x, 1), "%")) +
+  labs(
+    title = "Significant DE Rate by Compound",
+    x = NULL,
+    y = "Significant rate"
+  ) +
+  theme_minimal(base_size = 12)
+
+p2
+
+ggsave(file.path(fig_dir, "gdpx4_significant_rate_by_compound.png"), p2, width = 10, height = 6, dpi = 150)
+```
+
+## Plot 3: Cross-Compound Gene Recurrence (Top 25)
+
+```{r}
+rec_tbl <- read.csv(file.path(out_dir, "gdpx4_gene_recurrence.csv"), stringsAsFactors = FALSE)
+rec25 <- rec_tbl[1:min(25, nrow(rec_tbl)), ]
+rec25$gene <- factor(rec25$gene, levels = rev(rec25$gene))
+
+p3 <- ggplot(rec25, aes(x = gene, y = compounds_with_signal, fill = recurrence_score)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_gradient(low = "#a6cee3", high = "#1f78b4") +
+  labs(
+    title = "Top Recurrent Response Genes Across Compounds",
+    x = NULL,
+    y = "Compounds with signal",
+    fill = "Recurrence score"
+  ) +
+  theme_minimal(base_size = 11)
+
+p3
+
+ggsave(file.path(fig_dir, "gdpx4_gene_recurrence_top25.png"), p3, width = 10, height = 7, dpi = 150)
+```
+
+## Plot 4: Candidate Biomarkers for Top Active Compound
+
+```{r}
+bio_tbl <- read.csv(file.path(out_dir, "gdpx4_candidate_biomarkers.csv"), stringsAsFactors = FALSE)
+if (nrow(bio_tbl) > 0) {
+  top_label <- summary_tbl$target_compound[1]
+  bio_show <- bio_tbl[1:min(20, nrow(bio_tbl)), ]
+  bio_show$gene <- factor(bio_show$gene, levels = rev(bio_show$gene))
+
+  p4 <- ggplot(bio_show, aes(x = gene, y = biomarker_score, fill = abs_mean_lfc)) +
+    geom_col() +
+    coord_flip() +
+    scale_fill_gradient(low = "#fee8c8", high = "#e34a33") +
+    labs(
+      title = paste0("Candidate Biomarkers for ", top_label),
+      subtitle = "Score uses target-vs-DMSO delta, confidence, consistency, and compound-vs-rest specificity",
+      x = NULL,
+      y = "Biomarker score",
+      fill = "|Mean LFC|"
+    ) +
+    theme_minimal(base_size = 11)
+
+  print(p4)
+  ggsave(file.path(fig_dir, "gdpx4_candidate_biomarkers_top20.png"), p4, width = 10, height = 7, dpi = 150)
+} else {
+  cat("No biomarker candidates found under current thresholds.")
+}
+```
+
+## Plot 5: Target-vs-DMSO Delta vs Specificity
+
+```{r}
+if (nrow(bio_tbl) > 0 && "delta_lfc_vs_dmso" %in% colnames(bio_tbl)) {
+  scatter_tbl <- bio_tbl[1:min(40, nrow(bio_tbl)), ]
+  scatter_tbl$label <- as.character(scatter_tbl$gene)
+
+  p5 <- ggplot(scatter_tbl, aes(x = specificity_ratio, y = abs(delta_lfc_vs_dmso))) +
+    geom_point(aes(size = biomarker_score, color = target_neg_log10_min_padj), alpha = 0.85) +
+    geom_text(aes(label = label), hjust = 0, nudge_x = 0.05, size = 3, check_overlap = TRUE) +
+    labs(
+      title = paste0("Biomarker Landscape for ", summary_tbl$target_compound[1]),
+      subtitle = "Top candidates: specificity vs |target - DMSO| effect",
+      x = "Specificity ratio (target vs rest)",
+      y = "|Delta log2FC vs DMSO|",
+      color = "-log10(min padj)",
+      size = "Biomarker score"
+    ) +
+    theme_minimal(base_size = 11)
+
+  p5
+  ggsave(file.path(fig_dir, "gdpx4_biomarker_delta_vs_specificity.png"), p5, width = 11, height = 8, dpi = 150)
+}
+```
+
+## Plot 6: Heatmap (Top Recurrent Genes x Top Active Compounds)
+
+```{r}
+heat_tbl <- read.csv(file.path(out_dir, "gdpx4_heatmap_long.csv"), stringsAsFactors = FALSE)
+if (nrow(heat_tbl) > 0) {
+  # Order genes by average absolute effect in this displayed matrix
+  gene_order <- aggregate(abs(mean_lfc) ~ gene, data = heat_tbl, FUN = mean)
+  gene_order <- gene_order[order(gene_order[,2], decreasing = TRUE), "gene"]
+  comp_order <- aggregate(sig_rate ~ compound, data = heat_tbl, FUN = mean)
+  comp_order <- comp_order[order(comp_order[,2], decreasing = TRUE), "compound"]
+
+  heat_tbl$gene <- factor(heat_tbl$gene, levels = gene_order)
+  heat_tbl$compound <- factor(heat_tbl$compound, levels = comp_order)
+
+  p5 <- ggplot(heat_tbl, aes(x = compound, y = gene, fill = mean_lfc)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "#2166ac", mid = "#f7f7f7", high = "#b2182b", midpoint = 0) +
+    labs(
+      title = "Mean log2FC Heatmap: Top Recurrent Genes x Top Compounds",
+      x = "Compound",
+      y = "Gene",
+      fill = "Mean log2FC"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  p5
+  ggsave(file.path(fig_dir, "gdpx4_heatmap_top_genes_compounds.png"), p5, width = 11, height = 9, dpi = 150)
+} else {
+  cat("No heatmap rows available.")
+}
+```
+
+## Plot 7: Coexpression With Anchor Gene (Top |r| Genes)
+
+```{r}
+co_tbl <- read.csv(file.path(out_dir, "gdpx4_anchor_gene_coexpression_top40.csv"), stringsAsFactors = FALSE)
+if (nrow(co_tbl) > 0) {
+  co_show <- co_tbl[1:min(30, nrow(co_tbl)), ]
+  co_show$gene <- factor(co_show$gene, levels = rev(co_show$gene))
+
+  p7 <- ggplot(co_show, aes(x = gene, y = corr, fill = corr)) +
+    geom_col() +
+    coord_flip() +
+    scale_fill_gradient2(low = "#2166ac", mid = "#f7f7f7", high = "#b2182b", midpoint = 0) +
+    labs(
+      title = paste0("Top Coexpressed Genes With ", summary_tbl$anchor_gene_for_coexpression[1]),
+      subtitle = "Correlation across compound-container-concentration sample contexts",
+      x = NULL,
+      y = "Correlation (r)",
+      fill = "r"
+    ) +
+    theme_minimal(base_size = 11)
+
+  print(p7)
+  ggsave(file.path(fig_dir, "gdpx4_anchor_gene_top_coexpression.png"), p7, width = 10, height = 8, dpi = 150)
+}
+```
+
+## Plot 8: Anchor-Gene Scatter (Best Positive/Negative Correlates)
+
+```{r}
+scatter_long <- read.csv(file.path(out_dir, "gdpx4_anchor_gene_scatter.csv"), stringsAsFactors = FALSE)
+if (nrow(scatter_long) > 0) {
+  p8 <- ggplot(scatter_long, aes(x = anchor_lfc, y = gene_lfc)) +
+    geom_point(alpha = 0.35) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.7) +
+    facet_wrap(~gene, scales = "free_y") +
+    labs(
+      title = paste0("Anchor-Gene Correlation Scatter: ", summary_tbl$anchor_gene_for_coexpression[1]),
+      x = "Anchor gene log2FC",
+      y = "Gene log2FC"
+    ) +
+    theme_minimal(base_size = 11)
+
+  print(p8)
+  ggsave(file.path(fig_dir, "gdpx4_anchor_gene_scatter_facets.png"), p8, width = 11, height = 5, dpi = 150)
+}
+```

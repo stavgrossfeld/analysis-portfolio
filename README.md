@@ -18,6 +18,11 @@ Portfolio of reproducible bioinformatics analyses with rendered reports on GitHu
   - XGBoost multiclass model to predict `cell_line`
   - XGBoost feature-importance ranking for top differentiating genes
 
+- `gdpx4-drugseq/`
+  - Streaming parquet analysis for DRUG-seq in engineered HEK293 cells
+  - Hugging Face dataset ingestion (`ginkgo-datapoints/GDPx4`)
+  - Compound-level summaries and top differential-expression hits
+
 ## Live Site
 
 - GitHub Pages: `https://stavgrossfeld.github.io/analysis-portfolio/`
@@ -27,3 +32,4 @@ Portfolio of reproducible bioinformatics analyses with rendered reports on GitHu
 - `index.html`: GitHub Pages landing page
 - `pbmc3k-scrna/notebooks/`: PBMC reports and notebook sources
 - `breast-cancer-scrna/notebooks/`: Breast-cancer reports and notebook sources
+- `gdpx4-drugseq/`: GDPx4 streaming analysis scripts and outputs
